@@ -5,50 +5,63 @@ const Answer = require('../models/Answer');
 const Question = require('../models/Question');
 const Notification = require('../models/Notification');
 const User = require('../models/User'); // Import User model
+const { check, validationResult } = require('express-validator');
 
 // @route   POST api/answers/:question_id
 // @desc    Add an answer to a question
 // @access  Private
-router.post('/:question_id', auth, async (req, res) => {
-  try {
-    const question = await Question.findById(req.params.question_id);
-    if (!question) {
-      return res.status(404).json({ msg: 'Question not found' });
+router.post(
+  '/:question_id',
+  auth,
+  [
+    check('content', 'Answer content is required').not().isEmpty(),
+  ],
+  async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
     }
 
-    const newAnswer = new Answer({
-      content: req.body.content,
-      author: req.user.id,
-      question: req.params.question_id,
-    });
+    try {
+      const question = await Question.findById(req.params.question_id);
+      if (!question) {
+        return res.status(404).json({ msg: 'Question not found' });
+      }
 
-    const answer = await newAnswer.save();
-
-    // Increment answersCount in the Question model
-    question.answersCount = (question.answersCount || 0) + 1;
-    await question.save();
-
-    // Create notification if the answer is not from the question owner
-    if (question.author.toString() !== req.user.id) {
-      const notification = new Notification({
-        recipient: question.author,
-        type: 'answer',
-        message: `Someone answered your question: "${question.title.substring(0, 50)}..."`,
-        relatedEntity: question._id,
+      const newAnswer = new Answer({
+        content: req.body.content,
+        author: req.user.id,
+        question: req.params.question_id,
       });
-      await notification.save();
 
-      // Emit real-time notification
-      const io = req.app.get('socketio');
-      io.to(question.author.toString()).emit('newNotification', notification);
+      const answer = await newAnswer.save();
+
+      // Increment answersCount in the Question model
+      question.answersCount = (question.answersCount || 0) + 1;
+      await question.save();
+
+      // Create notification if the answer is not from the question owner
+      if (question.author.toString() !== req.user.id) {
+        const notification = new Notification({
+          recipient: question.author,
+          type: 'answer',
+          message: `Someone answered your question: "${question.title.substring(0, 50)}..."`,
+          relatedEntity: question._id,
+        });
+        await notification.save();
+
+        // Emit real-time notification
+        const io = req.app.get('socketio');
+        io.to(question.author.toString()).emit('newNotification', notification);
+      }
+
+      res.json(answer);
+    } catch (err) {
+      console.error(err.message);
+      res.status(500).send('Server Error');
     }
-
-    res.json(answer);
-  } catch (err) {
-    console.error(err.message);
-    res.status(500).send('Server Error');
   }
-});
+);
 
 // @route   GET api/answers/:question_id
 // @desc    Get all answers for a question
@@ -93,9 +106,6 @@ router.delete('/:id', auth, async (req, res) => {
     res.json({ msg: 'Answer removed' });
   } catch (err) {
     console.error(err.message);
-    if (err.kind === 'ObjectId') {
-      return res.status(404).json({ msg: 'Answer not found' });
-    }
     res.status(500).send('Server Error');
   }
 });

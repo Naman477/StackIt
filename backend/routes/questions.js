@@ -4,41 +4,56 @@ const auth = require('../middleware/authMiddleware');
 const Question = require('../models/Question');
 const User = require('../models/User');
 const Tag = require('../models/Tag');
+const { check, validationResult } = require('express-validator');
 
 // @route   POST api/questions
 // @desc    Create a question
 // @access  Private
-router.post('/', auth, async (req, res) => {
-  const { title, description, tags } = req.body;
-
-  try {
-    const user = await User.findById(req.user.id).select('-password');
-
-    // Handle tags: find existing or create new ones
-    const tagIds = [];
-    for (const tagName of tags) {
-      let tag = await Tag.findOne({ name: tagName });
-      if (!tag) {
-        tag = new Tag({ name: tagName });
-        await tag.save();
-      }
-      tagIds.push(tag.id);
+router.post(
+  '/',
+  auth,
+  [
+    check('title', 'Title is required').not().isEmpty(),
+    check('description', 'Description is required').not().isEmpty(),
+    check('tags', 'Tags are required').not().isEmpty(),
+  ],
+  async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
     }
 
-    const newQuestion = new Question({
-      title,
-      description,
-      tags: tagIds,
-      author: req.user.id,
-    });
+    const { title, description, tags } = req.body;
 
-    const question = await newQuestion.save();
-    res.json(question);
-  } catch (err) {
-    console.error(err.message);
-    res.status(500).send('Server Error');
+    try {
+      const user = await User.findById(req.user.id).select('-password');
+
+      // Handle tags: find existing or create new ones
+      const tagIds = [];
+      for (const tagName of tags) {
+        let tag = await Tag.findOne({ name: tagName });
+        if (!tag) {
+          tag = new Tag({ name: tagName });
+          await tag.save();
+        }
+        tagIds.push(tag.id);
+      }
+
+      const newQuestion = new Question({
+        title,
+        description,
+        tags: tagIds,
+        author: req.user.id,
+      });
+
+      const question = await newQuestion.save();
+      res.json(question);
+    } catch (err) {
+      console.error(err.message);
+      res.status(500).send('Server Error');
+    }
   }
-});
+);
 
 // @route   GET api/questions
 // @desc    Get all questions (with optional search query, pagination, sorting, and filtering)
@@ -129,9 +144,6 @@ router.delete('/:id', auth, async (req, res) => {
     res.json({ msg: 'Question removed' });
   } catch (err) {
     console.error(err.message);
-    if (err.kind === 'ObjectId') {
-      return res.status(404).json({ msg: 'Question not found' });
-    }
     res.status(500).send('Server Error');
   }
 });
@@ -139,52 +151,63 @@ router.delete('/:id', auth, async (req, res) => {
 // @route   PUT api/questions/:id
 // @desc    Update a question
 // @access  Private
-router.put('/:id', auth, async (req, res) => {
-  const { title, description, tags } = req.body;
-
-  // Build question object
-  const questionFields = {};
-  if (title) questionFields.title = title;
-  if (description) questionFields.description = description;
-
-  try {
-    let question = await Question.findById(req.params.id);
-
-    if (!question) return res.status(404).json({ msg: 'Question not found' });
-
-    // Check user
-    if (question.author.toString() !== req.user.id) {
-      return res.status(401).json({ msg: 'User not authorized' });
+router.put(
+  '/:id',
+  auth,
+  [
+    check('title', 'Title is required').not().isEmpty(),
+    check('description', 'Description is required').not().isEmpty(),
+    check('tags', 'Tags are required').not().isEmpty(),
+  ],
+  async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
     }
 
-    // Handle tags update
-    if (tags && tags.length > 0) {
-      const tagIds = [];
-      for (const tagName of tags) {
-        let tag = await Tag.findOne({ name: tagName });
-        if (!tag) {
-          tag = new Tag({ name: tagName });
-          await tag.save();
-        }
-        tagIds.push(tag.id);
+    const { title, description, tags } = req.body;
+
+    // Build question object
+    const questionFields = {};
+    if (title) questionFields.title = title;
+    if (description) questionFields.description = description;
+
+    try {
+      let question = await Question.findById(req.params.id);
+
+      if (!question) return res.status(404).json({ msg: 'Question not found' });
+
+      // Check user
+      if (question.author.toString() !== req.user.id) {
+        return res.status(401).json({ msg: 'User not authorized' });
       }
-      questionFields.tags = tagIds;
-    }
 
-    question = await Question.findOneAndUpdate(
-      { _id: req.params.id },
-      { $set: questionFields },
-      { new: true }
-    );
+      // Handle tags update
+      if (tags && tags.length > 0) {
+        const tagIds = [];
+        for (const tagName of tags) {
+          let tag = await Tag.findOne({ name: tagName });
+          if (!tag) {
+            tag = new Tag({ name: tagName });
+            await tag.save();
+          }
+          tagIds.push(tag.id);
+        }
+        questionFields.tags = tagIds;
+      }
 
-    res.json(question);
-  } catch (err) {
-    console.error(err.message);
-    if (err.kind === 'ObjectId') {
-      return res.status(404).json({ msg: 'Question not found' });
+      question = await Question.findOneAndUpdate(
+        { _id: req.params.id },
+        { $set: questionFields },
+        { new: true }
+      );
+
+      res.json(question);
+    } catch (err) {
+      console.error(err.message);
+      res.status(500).send('Server Error');
     }
-    res.status(500).send('Server Error');
   }
-});
+);
 
 module.exports = router;
